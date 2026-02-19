@@ -2,7 +2,7 @@ package fs
 
 import (
 	"bufio"
-	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,6 +30,13 @@ type Note struct {
 	UpdatedAt time.Time
 }
 
+const (
+	filePerm        = 0o644
+	noteExt         = ".md"
+	noteTemplate    = "# \n\n"
+	defaultNoteName = "(untitled)"
+)
+
 type Store struct {
 	paths config.Paths
 }
@@ -38,7 +45,7 @@ func NewStore(paths config.Paths) *Store {
 	return &Store{paths: paths}
 }
 
-func (s *Store) DirFor(section Section) string {
+func (s *Store) dirFor(section Section) string {
 	switch section {
 	case SectionTodo:
 		return s.paths.Todo
@@ -50,11 +57,11 @@ func (s *Store) DirFor(section Section) string {
 }
 
 func (s *Store) List(section Section) ([]Note, error) {
-	dir := s.DirFor(section)
+	dir := s.dirFor(section)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read section dir %q: %w", dir, err)
 	}
 
 	var notes []Note
@@ -63,7 +70,7 @@ func (s *Store) List(section Section) ([]Note, error) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".md") {
+		if !strings.HasSuffix(name, noteExt) {
 			continue
 		}
 
@@ -71,11 +78,18 @@ func (s *Store) List(section Section) ([]Note, error) {
 
 		info, err := e.Info()
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read file info %q: %w", path, err)
 		}
 
-		title := readFirstNonEmptyLine(path)
-		id := strings.TrimSuffix(name, ".md")
+		title, err := readFirstNonEmptyLine(path)
+		if err != nil {
+			return nil, err
+		}
+		if title == "" {
+			title = defaultNoteName
+		}
+
+		id := strings.TrimSuffix(name, noteExt)
 
 		notes = append(notes, Note{
 			ID:        id,
@@ -96,35 +110,30 @@ func (s *Store) List(section Section) ([]Note, error) {
 func (s *Store) ReadBody(path string) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read note %q: %w", path, err)
 	}
 	return string(b), nil
 }
 
 func (s *Store) Create(section Section) (Note, error) {
 	id := ulid.Make().String()
-	path := filepath.Join(s.DirFor(section), id+".md")
+	path := s.notePath(section, id)
 
-	template := "# " + "\n\n"
-
-	if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
-		return Note{}, err
+	if err := os.WriteFile(path, []byte(noteTemplate), filePerm); err != nil {
+		return Note{}, fmt.Errorf("create note %q: %w", path, err)
 	}
 
-	title := ""
-
-	info, _ := os.Stat(path)
-	mod := time.Now()
-	if info != nil {
-		mod = info.ModTime()
+	info, err := os.Stat(path)
+	if err != nil {
+		return Note{}, fmt.Errorf("stat new note %q: %w", path, err)
 	}
 
 	return Note{
 		ID:        id,
-		Title:     title,
+		Title:     defaultNoteName,
 		Path:      path,
 		Section:   section,
-		UpdatedAt: mod,
+		UpdatedAt: info.ModTime(),
 	}, nil
 }
 
@@ -132,9 +141,9 @@ func (s *Store) MoveToTrash(n Note) (Note, error) {
 	if n.Section == SectionTrash {
 		return n, nil
 	}
-	dst := filepath.Join(s.paths.Trash, n.ID+".md")
+	dst := s.notePath(SectionTrash, n.ID)
 	if err := os.Rename(n.Path, dst); err != nil {
-		return Note{}, err
+		return Note{}, fmt.Errorf("move note %q to trash: %w", n.Path, err)
 	}
 	n.Path = dst
 	n.Section = SectionTrash
@@ -149,9 +158,9 @@ func (s *Store) RestoreFromTrash(n Note, target Section) (Note, error) {
 	if target == SectionTrash {
 		target = SectionNotes
 	}
-	dst := filepath.Join(s.DirFor(target), n.ID+".md")
+	dst := s.notePath(target, n.ID)
 	if err := os.Rename(n.Path, dst); err != nil {
-		return Note{}, err
+		return Note{}, fmt.Errorf("restore note %q: %w", n.Path, err)
 	}
 	n.Path = dst
 	n.Section = target
@@ -159,10 +168,22 @@ func (s *Store) RestoreFromTrash(n Note, target Section) (Note, error) {
 	return n, nil
 }
 
-func readFirstNonEmptyLine(path string) string {
+func (s *Store) DeleteFromTrash(n Note) error {
+	if n.Section != SectionTrash {
+		return fmt.Errorf("delete from trash requires trash section, got %q", n.Section)
+	}
+
+	if err := os.Remove(n.Path); err != nil {
+		return fmt.Errorf("delete note %q from trash: %w", n.Path, err)
+	}
+
+	return nil
+}
+
+func readFirstNonEmptyLine(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("open note %q: %w", path, err)
 	}
 	defer f.Close()
 
@@ -176,13 +197,24 @@ func readFirstNonEmptyLine(path string) string {
 		if strings.HasPrefix(line, "#") {
 			line = strings.TrimSpace(strings.TrimLeft(line, "#"))
 		}
-		return line
+		return line, nil
 	}
-	return ""
+
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("scan note %q: %w", path, err)
+	}
+
+	return "", nil
 }
 
 func (s *Store) WriteBody(path, body string) error {
-	return os.WriteFile(path, []byte(body), 0o644)
+	if err := os.WriteFile(path, []byte(body), filePerm); err != nil {
+		return fmt.Errorf("write note %q: %w", path, err)
+	}
+
+	return nil
 }
 
-var ErrNotFound = errors.New("note not found")
+func (s *Store) notePath(section Section, id string) string {
+	return filepath.Join(s.dirFor(section), id+noteExt)
+}

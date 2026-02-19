@@ -19,6 +19,11 @@ type focusArea int
 type mode int
 
 const (
+	timeLayout = "2006-01-02 15:04"
+	loadingMsg = "loading..."
+)
+
+const (
 	focusSidebar focusArea = iota
 	focusPreview
 )
@@ -44,11 +49,10 @@ type noteItem struct {
 }
 
 func (i noteItem) Title() string       { return i.n.Title }
-func (i noteItem) Description() string { return i.n.UpdatedAt.Format("2006-01-02 15:04") }
+func (i noteItem) Description() string { return i.n.UpdatedAt.Format(timeLayout) }
 func (i noteItem) FilterValue() string { return i.n.Title }
 
 type Model struct {
-	paths config.Paths
 	store *fs.Store
 
 	width  int
@@ -103,7 +107,6 @@ func NewModel() (Model, error) {
 	h.ShowAll = false
 
 	m := Model{
-		paths:      paths,
 		store:      store,
 		focus:      focusSidebar,
 		sectionIdx: 1,
@@ -129,7 +132,6 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -140,197 +142,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
 		}
-		// ---------- EDIT MODE ----------
+
 		if m.mode == modeEdit {
-			switch {
-			case key.Matches(msg, m.keys.Quit):
-				return m, tea.Quit
-
-			case key.Matches(msg, m.keys.Cancel):
-				m.mode = modeBrowse
-				m.editor.Blur()
-				m.status = "Canceled"
-				m.dirty = false
-				m.syncSelection()
-				return m, nil
-
-			case key.Matches(msg, m.keys.Save):
-				if m.selected == nil {
-					return m, nil
-				}
-				selectedID := m.selected.ID
-				val := m.editor.Value()
-				if err := m.store.WriteBody(m.selected.Path, val); err != nil {
-					m.status = "save error: " + err.Error()
-					m.editErr = err
-					return m, nil
-				}
-
-				m.mode = modeBrowse
-				m.editor.Blur()
-				m.status = "Saved"
-				m.dirty = false
-				m.editErr = nil
-
-				_ = m.reloadNotes()
-				m.reselectByID(selectedID)
-				m.syncSelection()
-				return m, nil
-			}
-
-			var cmd tea.Cmd
-			before := m.editor.Value()
-			m.editor, cmd = m.editor.Update(msg)
-			if m.editor.Value() != before {
-				m.dirty = true
-			}
-			return m, cmd
+			next, cmd := m.updateEditMode(msg)
+			return next, cmd
 		}
 
-		// ---------- BROWSE MODE ----------
-		switch {
-		case key.Matches(msg, m.keys.Quit):
-			return m, tea.Quit
-
-		case key.Matches(msg, m.keys.Help):
-			m.showHelp = !m.showHelp
-			m.help.ShowAll = m.showHelp
-			return m, nil
-
-		case key.Matches(msg, m.keys.Tab):
-			if m.focus == focusSidebar {
-				m.focus = focusPreview
-			} else {
-				m.focus = focusSidebar
-			}
-			return m, nil
-
-		case key.Matches(msg, m.keys.Left):
-			m.focus = focusSidebar
-			return m, nil
-
-		case key.Matches(msg, m.keys.Right):
-			m.focus = focusPreview
-			return m, nil
-
-		case key.Matches(msg, m.keys.SectionDn):
-			m.sectionIdx = min(m.sectionIdx+1, len(sections)-1)
-			_ = m.reloadNotes()
-			m.syncSelection()
-			return m, nil
-
-		case key.Matches(msg, m.keys.SectionUp):
-			m.sectionIdx = max(m.sectionIdx-1, 0)
-			_ = m.reloadNotes()
-			m.syncSelection()
-			return m, nil
-
-		case key.Matches(msg, m.keys.Down):
-			if m.focus == focusSidebar {
-				m.noteList.CursorDown()
-				m.syncSelection()
-				return m, nil
-			}
-			m.preview.LineDown(1)
-			return m, nil
-
-		case key.Matches(msg, m.keys.Up):
-			if m.focus == focusSidebar {
-				m.noteList.CursorUp()
-				m.syncSelection()
-				return m, nil
-			}
-			m.preview.LineUp(1)
-			return m, nil
-
-		case key.Matches(msg, m.keys.New):
-			sec := sections[m.sectionIdx].key
-			n, err := m.store.Create(sec)
-			if err != nil {
-				m.status = "create error: " + err.Error()
-				return m, nil
-			}
-
-			_ = m.reloadNotes()
-			m.reselectByID(n.ID)
-			m.syncSelection()
-
-			if m.selected != nil {
-				body, err := m.store.ReadBody(m.selected.Path)
-				if err != nil {
-					m.status = "read error: " + err.Error()
-					return m, nil
-				}
-
-				m.mode = modeEdit
-				m.dirty = false
-				m.editErr = nil
-				m.editor.SetValue(body)
-				m.editor.CursorEnd()
-				m.editor.Focus()
-				m.focus = focusPreview
-			}
-			return m, nil
-
-		case key.Matches(msg, m.keys.Edit):
-			if m.selected == nil {
-				return m, nil
-			}
-			body, err := m.store.ReadBody(m.selected.Path)
-			if err != nil {
-				m.status = "read error: " + err.Error()
-				return m, nil
-			}
-
-			m.mode = modeEdit
-			m.dirty = false
-			m.editErr = nil
-			m.editor.SetValue(body)
-			m.editor.CursorEnd()
-			m.editor.Focus()
-			m.focus = focusPreview
-			return m, nil
-
-		case key.Matches(msg, m.keys.Trash):
-			if m.selected == nil {
-				return m, nil
-			}
-			if sections[m.sectionIdx].key == fs.SectionTrash {
-				m.status = "Already in Trash"
-				return m, nil
-			}
-			updated, err := m.store.MoveToTrash(*m.selected)
-			if err != nil {
-				m.status = "trash error: " + err.Error()
-				return m, nil
-			}
-			m.status = "Moved to Trash: " + updated.Title
-			_ = m.reloadNotes()
-			m.syncSelection()
-			return m, nil
-
-		case key.Matches(msg, m.keys.Restore):
-			if m.selected == nil {
-				return m, nil
-			}
-			if sections[m.sectionIdx].key != fs.SectionTrash {
-				m.status = "Restore works only in Trash"
-				return m, nil
-			}
-			updated, err := m.store.RestoreFromTrash(*m.selected, fs.SectionNotes)
-			if err != nil {
-				m.status = "restore error: " + err.Error()
-				return m, nil
-			}
-			m.status = "Restored: " + updated.Title
-			_ = m.reloadNotes()
-			m.syncSelection()
-			return m, nil
-		}
-
-		var cmd tea.Cmd
-		m.noteList, cmd = m.noteList.Update(msg)
-		return m, cmd
+		next, cmd := m.updateBrowseMode(msg)
+		return next, cmd
 	}
 
 	return m, nil
@@ -338,16 +157,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
-		return "loading..."
+		return loadingMsg
 	}
 
 	sidebar := m.renderSidebar()
 	preview := m.renderPreview()
 
 	root := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, preview)
+	status := m.renderStatus()
 	help := m.renderHelp()
 
-	return lipgloss.JoinVertical(lipgloss.Left, root, help)
+	return lipgloss.JoinVertical(lipgloss.Left, root, status, help)
 }
 
 // ---------- rendering ----------
@@ -360,6 +180,157 @@ var (
 	focusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 )
+
+func (m Model) updateEditMode(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
+		m.exitEditMode("Canceled")
+		return m, nil
+
+	case key.Matches(msg, m.keys.Save):
+		if m.selected == nil {
+			return m, nil
+		}
+
+		selectedID := m.selected.ID
+		body := m.editor.Value()
+		if err := m.store.WriteBody(m.selected.Path, body); err != nil {
+			m.status = "save error: " + err.Error()
+			m.editErr = err
+			return m, nil
+		}
+
+		m.exitEditMode("Saved")
+		m.refreshNotesAndReselect(selectedID)
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	before := m.editor.Value()
+	m.editor, cmd = m.editor.Update(msg)
+	if m.editor.Value() != before {
+		m.dirty = true
+	}
+
+	return m, cmd
+}
+
+func (m Model) updateBrowseMode(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Help):
+		if sections[m.sectionIdx].key == fs.SectionTrash {
+			return m, nil
+		}
+		m.showHelp = !m.showHelp
+		m.help.ShowAll = m.showHelp
+		return m, nil
+
+	case key.Matches(msg, m.keys.Tab):
+		if m.focus == focusSidebar {
+			m.focus = focusPreview
+		} else {
+			m.focus = focusSidebar
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.Left):
+		m.focus = focusSidebar
+		return m, nil
+
+	case key.Matches(msg, m.keys.Right):
+		m.focus = focusPreview
+		return m, nil
+
+	case key.Matches(msg, m.keys.SectionDn):
+		m.sectionIdx = min(m.sectionIdx+1, len(sections)-1)
+		m.refreshNotesAndSelection()
+		return m, nil
+
+	case key.Matches(msg, m.keys.SectionUp):
+		m.sectionIdx = max(m.sectionIdx-1, 0)
+		m.refreshNotesAndSelection()
+		return m, nil
+
+	case key.Matches(msg, m.keys.Down):
+		if m.focus == focusSidebar {
+			m.noteList.CursorDown()
+			m.syncSelection()
+			return m, nil
+		}
+		m.preview.LineDown(1)
+		return m, nil
+
+	case key.Matches(msg, m.keys.Up):
+		if m.focus == focusSidebar {
+			m.noteList.CursorUp()
+			m.syncSelection()
+			return m, nil
+		}
+		m.preview.LineUp(1)
+		return m, nil
+
+	case key.Matches(msg, m.keys.New):
+		note, err := m.store.Create(sections[m.sectionIdx].key)
+		if err != nil {
+			m.status = "create error: " + err.Error()
+			return m, nil
+		}
+
+		m.refreshNotesAndReselect(note.ID)
+		return m.startEditingSelected()
+
+	case key.Matches(msg, m.keys.Edit):
+		return m.startEditingSelected()
+
+	case key.Matches(msg, m.keys.Trash):
+		if m.selected == nil {
+			return m, nil
+		}
+		if sections[m.sectionIdx].key == fs.SectionTrash {
+			if err := m.store.DeleteFromTrash(*m.selected); err != nil {
+				m.status = "delete error: " + err.Error()
+				return m, nil
+			}
+
+			m.status = "Deleted permanently: " + m.selected.Title
+			m.refreshNotesAndSelection()
+			return m, nil
+		}
+
+		updated, err := m.store.MoveToTrash(*m.selected)
+		if err != nil {
+			m.status = "trash error: " + err.Error()
+			return m, nil
+		}
+
+		m.status = "Moved to Trash: " + updated.Title
+		m.refreshNotesAndSelection()
+		return m, nil
+
+	case key.Matches(msg, m.keys.Restore):
+		if m.selected == nil {
+			return m, nil
+		}
+		if sections[m.sectionIdx].key != fs.SectionTrash {
+			m.status = "restore works only in Trash"
+			return m, nil
+		}
+
+		updated, err := m.store.RestoreFromTrash(*m.selected, fs.SectionNotes)
+		if err != nil {
+			m.status = "restore error: " + err.Error()
+			return m, nil
+		}
+
+		m.status = "Restored: " + updated.Title
+		m.refreshNotesAndSelection()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.noteList, cmd = m.noteList.Update(msg)
+	return m, cmd
+}
 
 func (m Model) renderSidebar() string {
 	sec := sections[m.sectionIdx]
@@ -408,7 +379,7 @@ func (m Model) renderPreviewMeta() string {
 	noteDate := "-"
 	if m.selected != nil {
 		noteTitle = m.selected.Title
-		noteDate = m.selected.UpdatedAt.Format("2006-01-02 15:04")
+		noteDate = m.selected.UpdatedAt.Format(timeLayout)
 	}
 
 	return strings.Join([]string{
@@ -419,10 +390,23 @@ func (m Model) renderPreviewMeta() string {
 	}, "\n")
 }
 
+func (m Model) renderStatus() string {
+	if strings.TrimSpace(m.status) == "" {
+		return ""
+	}
+
+	return lipgloss.NewStyle().Padding(0, 1).Render(statusStyle.Render(m.status))
+}
+
 func (m Model) renderHelp() string {
 	if m.mode == modeEdit {
 		return lipgloss.NewStyle().Padding(0, 1).Render(
 			m.help.View(editKeyMap{KeyMap: m.keys}),
+		)
+	}
+	if sections[m.sectionIdx].key == fs.SectionTrash {
+		return lipgloss.NewStyle().Padding(0, 1).Render(
+			m.help.View(trashKeyMap{KeyMap: m.keys}),
 		)
 	}
 
@@ -450,6 +434,25 @@ func (m *Model) layout() {
 	m.editor.SetWidth(rightW)
 	m.editor.SetHeight(previewBodyH)
 
+	m.syncSelection()
+}
+
+func (m *Model) refreshNotesAndSelection() {
+	if err := m.reloadNotes(); err != nil {
+		m.status = "load error: " + err.Error()
+		return
+	}
+
+	m.syncSelection()
+}
+
+func (m *Model) refreshNotesAndReselect(noteID string) {
+	if err := m.reloadNotes(); err != nil {
+		m.status = "load error: " + err.Error()
+		return
+	}
+
+	m.reselectByID(noteID)
 	m.syncSelection()
 }
 
@@ -510,19 +513,41 @@ func (m *Model) reselectByID(id string) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+func (m *Model) startEditingSelected() (Model, tea.Cmd) {
+	if m.selected == nil {
+		return *m, nil
 	}
-	return b
+
+	body, err := m.store.ReadBody(m.selected.Path)
+	if err != nil {
+		m.status = "read error: " + err.Error()
+		return *m, nil
+	}
+
+	m.mode = modeEdit
+	m.dirty = false
+	m.editErr = nil
+	m.editor.SetValue(body)
+	m.editor.CursorEnd()
+	m.editor.Focus()
+	m.focus = focusPreview
+
+	return *m, nil
 }
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+
+func (m *Model) exitEditMode(status string) {
+	m.mode = modeBrowse
+	m.editor.Blur()
+	m.status = status
+	m.dirty = false
+	m.editErr = nil
+	m.syncSelection()
 }
 
 type editKeyMap struct{ KeyMap }
 
 func (k editKeyMap) ShortHelp() []key.Binding { return k.KeyMap.EditShortHelp() }
+
+type trashKeyMap struct{ KeyMap }
+
+func (k trashKeyMap) ShortHelp() []key.Binding { return k.KeyMap.TrashShortHelp() }
