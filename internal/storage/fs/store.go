@@ -76,9 +76,6 @@ func (s *Store) List(section Section) ([]Note, error) {
 
 		title := readFirstNonEmptyLine(path)
 		id := strings.TrimSuffix(name, ".md")
-		if title == "" {
-			title = id
-		}
 
 		notes = append(notes, Note{
 			ID:        id,
@@ -108,16 +105,13 @@ func (s *Store) Create(section Section) (Note, error) {
 	id := ulid.Make().String()
 	path := filepath.Join(s.DirFor(section), id+".md")
 
-	template := "# " + id + "\n\n"
+	template := "# " + "\n\n"
 
 	if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
 		return Note{}, err
 	}
 
-	title := readFirstNonEmptyLine(path)
-	if title == "" {
-		title = id
-	}
+	title := ""
 
 	info, _ := os.Stat(path)
 	mod := time.Now()
