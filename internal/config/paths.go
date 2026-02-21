@@ -1,8 +1,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+)
+
+const (
+	dirPerm = 0o755
 )
 
 type Paths struct {
@@ -12,11 +17,11 @@ type Paths struct {
 	Trash string
 }
 
+// ResolvePaths resolves and creates Tenote data directories.
 func ResolvePaths() (Paths, error) {
-	// XDG-ish: ~/.local/share/tenote
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return Paths{}, err
+		return Paths{}, fmt.Errorf("resolve user home dir: %w", err)
 	}
 
 	root := filepath.Join(home, ".local", "share", "tenote")
@@ -28,8 +33,8 @@ func ResolvePaths() (Paths, error) {
 	}
 
 	for _, dir := range []string{p.Root, p.Notes, p.Todo, p.Trash} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return Paths{}, err
+		if err := os.MkdirAll(dir, dirPerm); err != nil {
+			return Paths{}, fmt.Errorf("create data dir %q: %w", dir, err)
 		}
 	}
 

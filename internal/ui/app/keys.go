@@ -20,6 +20,7 @@ type KeyMap struct {
 	New       key.Binding
 	Edit      key.Binding
 	Trash     key.Binding
+	Delete    key.Binding
 	Restore   key.Binding
 
 	// edit mode
@@ -81,6 +82,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("d"),
 			key.WithHelp("d", "to trash"),
 		),
+		Delete: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "delete forever"),
+		),
 		Restore: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "restore"),
@@ -103,15 +108,19 @@ func (k KeyMap) ShortHelp() []key.Binding {
 		k.Tab,
 		k.New,
 		k.Edit,
+		k.Trash,
 		k.Quit,
 	}
 }
 
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.SectionUp, k.SectionDn},
-		{k.New, k.Edit, k.Trash, k.Restore},
-		{k.Tab, k.Help, k.Quit},
+		{k.Up, k.Down},
+		{k.SectionUp, k.SectionDn},
+		{k.New, k.Edit},
+		{k.Trash, k.Restore},
+		{k.Tab, k.Help},
+		{k.Quit},
 	}
 }
 
@@ -119,6 +128,14 @@ func (k KeyMap) EditShortHelp() []key.Binding {
 	return []key.Binding{
 		k.Save,
 		k.Cancel,
+		k.Quit,
+	}
+}
+
+func (k KeyMap) TrashShortHelp() []key.Binding {
+	return []key.Binding{
+		k.Delete,
+		k.Restore,
 		k.Quit,
 	}
 }
