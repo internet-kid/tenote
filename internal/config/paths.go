@@ -16,14 +16,17 @@ type Paths struct {
 	Trash string
 }
 
-// ResolvePaths resolves and creates Tenote data directories.
+// ResolvePaths resolves and creates Tenote data directories using the saved config.
 func ResolvePaths() (Paths, error) {
-	home, err := os.UserHomeDir()
+	cfg, err := LoadConfig()
 	if err != nil {
-		return Paths{}, fmt.Errorf("resolve user home dir: %w", err)
+		return Paths{}, fmt.Errorf("load config: %w", err)
 	}
+	return ResolvePathsFrom(cfg.StorageDir)
+}
 
-	root := filepath.Join(home, ".local", "share", "tenote")
+// ResolvePathsFrom resolves and creates Tenote data directories rooted at root.
+func ResolvePathsFrom(root string) (Paths, error) {
 	p := Paths{
 		Root:  root,
 		Notes: filepath.Join(root, "notes"),
