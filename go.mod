@@ -1,4 +1,4 @@
-module tenote
+module github.com/internet-kid/tenote
 
 go 1.24.4
 

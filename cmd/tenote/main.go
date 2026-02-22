@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"tenote/internal/ui/app"
-	"tenote/internal/ui/menu"
+	"github.com/internet-kid/tenote/internal/ui/app"
+	"github.com/internet-kid/tenote/internal/ui/menu"
 )
 
 func main() {
