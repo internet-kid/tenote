@@ -11,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"tenote/internal/config"
+	"github.com/internet-kid/tenote/internal/config"
 )
 
 // OpenNotesMsg is sent to the parent model when the user picks "Open Notes".

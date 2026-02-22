@@ -3,7 +3,7 @@ package fs
 import (
 	"path/filepath"
 
-	"tenote/internal/config"
+	"github.com/internet-kid/tenote/internal/config"
 )
 
 const (

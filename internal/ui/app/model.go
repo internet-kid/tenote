@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
-	"tenote/internal/config"
-	"tenote/internal/storage/fs"
+	"github.com/internet-kid/tenote/internal/config"
+	"github.com/internet-kid/tenote/internal/storage/fs"
 )
 
 type focusArea int
