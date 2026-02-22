@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
 	"tenote/internal/config"
@@ -39,7 +40,6 @@ type sectionItem struct {
 }
 
 var sections = []sectionItem{
-	{key: fs.SectionTodo, title: "TODO"},
 	{key: fs.SectionNotes, title: "Notes"},
 	{key: fs.SectionTrash, title: "Trash"},
 }
@@ -79,6 +79,8 @@ type Model struct {
 	showHelp bool
 
 	status string
+
+	renderer *glamour.TermRenderer
 }
 
 func NewModel() (Model, error) {
@@ -88,7 +90,10 @@ func NewModel() (Model, error) {
 	}
 	store := fs.NewStore(paths)
 
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	del := list.NewDefaultDelegate()
+	del.Styles.SelectedTitle = del.Styles.SelectedTitle.Foreground(lipgloss.Color("#25b067")).BorderForeground(lipgloss.Color("#25b067"))
+	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(lipgloss.Color("#25b067")).BorderForeground(lipgloss.Color("#25b067"))
+	l := list.New([]list.Item{}, del, 0, 0)
 	l.Title = "Notes"
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
@@ -109,7 +114,7 @@ func NewModel() (Model, error) {
 	m := Model{
 		store:      store,
 		focus:      focusSidebar,
-		sectionIdx: 1,
+		sectionIdx: 0,
 		noteList:   l,
 		preview:    vp,
 		mode:       modeBrowse,
@@ -177,7 +182,7 @@ var (
 
 	titleStyle  = lipgloss.NewStyle().Bold(true)
 	blurStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	focusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	focusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#25b067"))
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 )
 
@@ -270,6 +275,9 @@ func (m Model) updateBrowseMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.New):
+		if sections[m.sectionIdx].key == fs.SectionTrash {
+			return m, nil
+		}
 		note, err := m.store.Create(sections[m.sectionIdx].key)
 		if err != nil {
 			m.status = "create error: " + err.Error()
@@ -280,6 +288,9 @@ func (m Model) updateBrowseMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.startEditingSelected()
 
 	case key.Matches(msg, m.keys.Edit):
+		if sections[m.sectionIdx].key == fs.SectionTrash {
+			return m, nil
+		}
 		return m.startEditingSelected()
 
 	case key.Matches(msg, m.keys.Trash):
@@ -342,7 +353,7 @@ func (m Model) renderSidebar() string {
 	box := border.Width(m.noteList.Width()).Height(m.noteList.Height()+2).Padding(0, 1)
 
 	listView := m.noteList.View()
-	return box.Render(secLine + "\n" + listView)
+	return box.Render(secLine + "\n\n" + listView)
 }
 
 func (m Model) renderPreview() string {
@@ -369,7 +380,7 @@ func (m Model) renderPreview() string {
 
 	box := border.Width(w).Height(m.noteList.Height()+2).Padding(0, 1)
 	if m.focus == focusPreview {
-		box = box.BorderForeground(lipgloss.Color("205"))
+		box = box.BorderForeground(lipgloss.Color("#25b067"))
 	}
 	return box.Render(header + "\n" + meta + "\n\n" + content)
 }
@@ -434,6 +445,17 @@ func (m *Model) layout() {
 	m.editor.SetWidth(rightW)
 	m.editor.SetHeight(previewBodyH)
 
+	wrapWidth := rightW - 2
+	if wrapWidth < 20 {
+		wrapWidth = 20
+	}
+	if r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(wrapWidth),
+	); err == nil {
+		m.renderer = r
+	}
+
 	m.syncSelection()
 }
 
@@ -496,7 +518,7 @@ func (m *Model) syncSelection() {
 	body, err := m.store.ReadBody(n.Path)
 	m.previewErr = err
 	if err == nil {
-		m.preview.SetContent(body)
+		m.preview.SetContent(m.renderMarkdown(body))
 	}
 }
 
@@ -533,6 +555,17 @@ func (m *Model) startEditingSelected() (Model, tea.Cmd) {
 	m.focus = focusPreview
 
 	return *m, nil
+}
+
+func (m *Model) renderMarkdown(body string) string {
+	if m.renderer == nil {
+		return body
+	}
+	rendered, err := m.renderer.Render(body)
+	if err != nil {
+		return body
+	}
+	return rendered
 }
 
 func (m *Model) exitEditMode(status string) {
