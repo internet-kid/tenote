@@ -13,26 +13,27 @@ const (
 type Paths struct {
 	Root  string
 	Notes string
-	Todo  string
 	Trash string
 }
 
-// ResolvePaths resolves and creates Tenote data directories.
+// ResolvePaths resolves and creates Tenote data directories using the saved config.
 func ResolvePaths() (Paths, error) {
-	home, err := os.UserHomeDir()
+	cfg, err := LoadConfig()
 	if err != nil {
-		return Paths{}, fmt.Errorf("resolve user home dir: %w", err)
+		return Paths{}, fmt.Errorf("load config: %w", err)
 	}
+	return ResolvePathsFrom(cfg.StorageDir)
+}
 
-	root := filepath.Join(home, ".local", "share", "tenote")
+// ResolvePathsFrom resolves and creates Tenote data directories rooted at root.
+func ResolvePathsFrom(root string) (Paths, error) {
 	p := Paths{
 		Root:  root,
 		Notes: filepath.Join(root, "notes"),
-		Todo:  filepath.Join(root, "todo"),
 		Trash: filepath.Join(root, "trash"),
 	}
 
-	for _, dir := range []string{p.Root, p.Notes, p.Todo, p.Trash} {
+	for _, dir := range []string{p.Root, p.Notes, p.Trash} {
 		if err := os.MkdirAll(dir, dirPerm); err != nil {
 			return Paths{}, fmt.Errorf("create data dir %q: %w", dir, err)
 		}
